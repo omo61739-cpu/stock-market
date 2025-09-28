@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Paper Trader (Offline, No API)</title>
+<!-- กราฟ Lightweight Charts (ไม่ต้องมีคีย์) -->
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+:root{
+  --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22d3ee; --green:#10b981; --red:#ef4444; --card:#0b1220; --border:#1f2937;
+}
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0b1020,#0b1220 50%,#0a0f1f);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,"Noto Sans Thai","Noto Sans",Arial}
+header{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);background:#0c1426;position:sticky;top:0;z-index:5}
+header .title{font-weight:700;letter-spacing:.2px}
+.badge{font-size:12px;color:#0ea5e9;background:#082031;border:1px solid #113b57;padding:3px 8px;border-radius:999px}
+.container{display:grid;grid-template-columns:320px 1fr 380px;gap:12px;padding:12px}
+@media (max-width:1100px){.container{grid-template-columns:1fr}}
+section.card{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.card h3{margin:0;padding:10px 12px;border-bottom:1px solid var(--border);background:#0e182c;font-size:13px;color:var(--muted);letter-spacing:.4px;text-transform:uppercase}
+.card .body{padding:12px}
+input,select,button{font:inherit}
+input[type="text"],input[type="number"],input[type="file"],select{
+  width:100%;background:#0a1324;color:var(--text);border:1px solid #213149;border-radius:8px;padding:8px 10px;outline:none
+}
+input:focus,select:focus{border-color:#2eaedb;box-shadow:0 0 0 2px #1b3a53}
+button{cursor:pointer;border:1px solid #1e293b;background:#10233b;color:var(--text);padding:8px 10px;border-radius:8px}
+button.primary{background:linear-gradient(180deg,#0fb3d1,#0891b2);border-color:#0ea5b1}
+button.buy{background:linear-gradient(180deg,#16a34a,#0f8c3f);border-color:#16a34a}
+button.sell{background:linear-gradient(180deg,#ef4444,#b91c1c);border-color:#ef4444}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted)}
+.pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#0a1324;color:var(--muted);font-size:12px}
+.watchlist{display:flex;flex-wrap:wrap;gap:8px}
+.chip{padding:6px 10px;background:#0b1220;border:1px solid #1e293b;border-radius:999px;cursor:pointer}
+.chip.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(34,211,238,.25)}
+#chart{height:420px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px}
+.stat .k{font-size:12px;color:var(--muted)} .stat .v{font-weight:700;font-size:18px}
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid #1b2a3f;padding:8px;text-align:right}
+th{text-align:right;color:var(--muted);font-weight:600;font-size:12px}
+th:first-child,td:first-child{text-align:left}
+.pos{color:var(--green)} .neg{color:var(--red)}
+.hint{font-size:12px;color:#93c5fd;background:#0b2142;border:1px solid #193b6e;padding:8px;border-radius:8px;margin-top:8px}
+h4{margin:12px 0 6px}
+footer{padding:12px;color:#8da2c0;text-align:center}
+dialog{max-width:560px;width:92%;border:none;border-radius:12px;background:#0c162b;color:var(--text)}
+</style>
+</head>
+<body>
+<header>
+  <div class="title">📈 Paper Trader (Offline • No API)</div>
+  <div class="flex">
+    <span id="modeBadge" class="badge">Simulator</span>
+    <button id="settingsBtn">ตั้งค่า</button>
+    <button id="resetBtn" title="ล้างข้อมูลทั้งหมด">รีเซ็ตพอร์ต</button>
+  </div>
+</header>
+
+<div class="container">
+  <!-- ซ้าย: สัญลักษณ์ & ออเดอร์ -->
+  <section class="card">
+    <h3>เลือกหุ้น & วางออเดอร์</h3>
+    <div class="body">
+      <div class="row">
+        <div>
+          <label>สัญลักษณ์ (ตั้งเองได้ เช่น AAPL, PTTEP)</label>
+          <input id="symbolInput" type="text" placeholder="พิมพ์สัญลักษณ์…" />
+        </div>
+        <div style="align-self:end"><button id="setSymbolBtn" class="primary" style="width:100%">ตั้ง</button></div>
+      </div>
+      <div class="watchlist" id="watchlist"></div>
+      <div class="hint">ทริค: ดับเบิลคลิกสัญลักษณ์เพื่อปักหมุดเป็นค่าเริ่มต้น</div>
+
+      <hr style="border-color:#1e293b;margin:12px 0">
+      <div class="row">
+        <div><label>จำนวน (หุ้น)</label><input id="qtyInput" type="number" min="1" step="1" value="1"></div>
+        <div><label>ราคาล่าสุด</label><div id="pxNow" class="pill">—</div></div>
+      </div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="btnBuy" class="buy">ซื้อ (Market)</button>
+        <button id="btnSell" class="sell">ขาย (Market)</button>
+      </div>
+
+      <h4>ออเดอร์ขั้นสูง</h4>
+      <div class="row">
+        <div><label>Limit Price</label><input id="limitPx" type="number" step="0.01" placeholder="ใส่ราคาถ้าจะตั้ง Limit"></div>
+        <div><label>Stop Price</label><input id="stopPx" type="number" step="0.01" placeholder="ใส่ราคาถ้าจะตั้ง Stop"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnPlaceLimitBuy">ตั้ง BUY Limit</button>
+        <button id="btnPlaceLimitSell">ตั้ง SELL Limit</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnPlaceStopBuy">ตั้ง BUY Stop</button>
+        <button id="btnPlaceStopSell">ตั้ง SELL Stop</button>
+      </div>
+      <div class="hint">Limit = รอให้ราคาดีตามที่ตั้ง • Stop = ทริกเกอร์แล้วกลายเป็นคำสั่งตลาด</div>
+    </div>
+  </section>
+
+  <!-- กลาง: กราฟ -->
+  <section class="card" style="min-width:280px">
+    <h3>กราฟราคา (Offline Simulator / CSV Replay)</h3>
+    <div class="body">
+      <div id="chart"></div>
+      <div class="flex" style="margin-top:8px">
+        <label>กรอบเวลา</label>
+        <select id="resolution">
+          <option value="1">1m</option><option value="5">5m</option>
+          <option value="15" selected>15m</option><option value="60">1h</option><option value="D">1D</option>
+        </select>
+        <button id="reloadBtn">เริ่มกราฟใหม่</button>
+        <span class="pill" id="engineLabel">Engine: Simulator</span>
+      </div>
+
+      <h4>โหมดข้อมูล</h4>
+      <div class="flex">
+        <select id="dataMode">
+          <option value="sim" selected>Simulator (ไม่ใช้ข้อมูลจริง)</option>
+          <option value="csv">CSV Replay (อัปโหลดไฟล์)</option>
+        </select>
+        <div id="simPanel" class="flex">
+          <span class="pill">μ (drift)</span><input id="mu" type="number" step="0.01" value="0.12" style="width:90px">
+          <span class="pill">σ (vol)</span><input id="sigma" type="number" step="0.01" value="0.30" style="width:90px">
+          <span class="pill">Tick (ms)</span><input id="tickMs" type="number" step="50" value="1000" style="width:90px">
+          <span class="pill">Seed</span><input id="seed" type="number" step="1" value="1" style="width:90px">
+        </div>
+        <div id="csvPanel" class="flex" style="display:none">
+          <input id="csvFile" type="file" accept=".csv,text/csv" />
+          <label>ความเร็ว</label>
+          <select id="replaySpeed">
+            <option value="1">1x</option><option value="2">2x</option><option value="5" selected>5x</option><option value="10">10x</option><option value="30">30x</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="hint">
+        CSV ที่รองรับ: มีหัวคอลัมน์อย่างน้อย <code>time,open,high,low,close</code> (เวลาเป็น UNIX seconds หรือ ISO8601) หนึ่งแถวต่อหนึ่งแท่งเทียน
+      </div>
+    </div>
+  </section>
+
+  <!-- ขวา: พอร์ต/ออเดอร์ -->
+  <section class="card">
+    <h3>พอร์ตของฉัน</h3>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><div class="k">เงินสด</div><div id="cash" class="v">—</div></div>
+        <div class="stat"><div class="k">มูลค่าพอร์ต</div><div id="equity" class="v">—</div></div>
+        <div class="stat"><div class="k">กำไร–ขาดทุนรวม</div><div id="totalPnL" class="v">—</div></div>
+      </div>
+
+      <h4>สถานะเปิด</h4>
+      <table id="posTable">
+        <thead><tr><th>สัญลักษณ์</th><th>จำนวน</th><th>ต้นทุนเฉลี่ย</th><th>ราคา</th><th>PnL</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h4>ออเดอร์ค้าง</h4>
+      <table id="ordTable">
+        <thead><tr><th>เวลา</th><th>สัญลักษณ์</th><th>ด้าน</th><th>ชนิด</th><th>ราคา</th><th>จำนวน</th><th>ยกเลิก</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <h4>ประวัติการเทรด</h4>
+      <table id="histTable">
+        <thead><tr><th>เวลา</th><th>สัญลักษณ์</th><th>ด้าน</th><th>จำนวน</th><th>ราคา</th><th>มูลค่า</th><th>Realized</th></tr></thead>
+        <tbody></tbody>
+      </table>
+
+      <div class="hint">ข้อมูลทั้งหมดเก็บเฉพาะอุปกรณ์นี้ (localStorage)</div>
+    </div>
+  </section>
+</div>
+
+<!-- ตั้งค่า -->
+<dialog id="settingsDlg">
+  <div style="padding:14px 16px;border-bottom:1px solid #1e293b;display:flex;justify-content:space-between;align-items:center">
+    <div style="font-weight:700">ตั้งค่า</div><button id="closeSettings">ปิด</button>
+  </div>
+  <div style="padding:16px;display:grid;gap:12px">
+    <div class="row">
+      <div>
+        <label>เงินตั้งต้น (USD)</label>
+        <input id="startingCash" type="number" min="0" step="100" value="10000">
+      </div>
+      <div style="align-self:end"><button id="saveSettings" class="primary">บันทึก</button></div>
+    </div>
+    <div class="hint">ถ้ายังไม่เคยเทรด ระบบจะตั้งเงินสดเท่ากับเงินตั้งต้นโดยอัตโนมัติ</div>
+  </div>
+</dialog>
+
+<footer>สร้างเพื่อการศึกษา ไม่ใช่คำแนะนำการลงทุน</footer>
+
+<script>
+(() => {
+  // ===== Utils / Storage =====
+  const $ = s => document.querySelector(s);
+  const fmtUSD = n => (n??0).toLocaleString('th-TH',{style:'currency',currency:'USD',maximumFractionDigits:2});
+  const fmtNum = n => (n??0).toLocaleString('th-TH', {maximumFractionDigits:2});
+  const LSK = 'paper_trader_offline_v1';
+
+  const defaultState = {
+    startingCash: 10000, cash: 10000,
+    positions: {}, // sym -> {qty, avg, lots:[{qty,price}]}
+    history: [],   // fills
+    orders: [],    // open orders
+    pinned: 'AAPL',
+    symbol: 'AAPL',
+    symbolPrice: {}, // last price per symbol
+    simSeeds: {},    // sym -> seed
+  };
+  let state = {...defaultState, ...(JSON.parse(localStorage.getItem(LSK)||'{}'))};
+  function save(){ localStorage.setItem(LSK, JSON.stringify(state)); }
+  function resetAll(){
+    if(!confirm('ล้างข้อมูลทั้งหมด?')) return;
+    const keep = { pinned: state.pinned };
+    state = {...defaultState, ...keep};
+    state.cash = state.startingCash;
+    save(); location.reload();
+  }
+
+  // ===== RNG (seeded) & Math =====
+  function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+  function xorshift32(a){ return function(){ a^=a<<13; a^=a>>>17; a^=a<<5; return (a>>>0)/0xFFFFFFFF; }; }
+  function gaussian(rng){
+    // Box-Muller
+    let u=0,v=0; while(u===0)u=rng(); while(v===0)v=rng();
+    return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);
+  }
+
+  // ===== Chart =====
+  const chart = LightweightCharts.createChart($('#chart'), {
+    layout:{ background:{ type:'solid', color:'#0b1220' }, textColor:'#cbd5e1' },
+    grid:{ vertLines:{ color:'#12233e' }, horzLines:{ color:'#12233e' } },
+    rightPriceScale:{ borderVisible:false },
+    timeScale:{ borderVisible:false, timeVisible:true, secondsVisible:false }
+  });
+  const candleSeries = chart.addCandlestickSeries();
+  const priceLineSeries = chart.addLineSeries({ lineWidth:1 });
+
+  const RES_SEC = { '1':60,'5':300,'15':900,'60':3600,'D':86400 };
+
+  // ===== Engine (Simulator/CSV) =====
+  let engine = {
+    mode: 'sim', // 'sim' | 'csv'
+    lastPrice: null,
+    lastBarStart: 0,
+    curBar: null,
+    timer: null,
+    symbol: 'AAPL',
+    resolution: '15',
+    // sim params
+    mu: 0.12, sigma: 0.30, tickMs: 1000, seed: 1, rng: null,
+    // csv params
+    csvCandles: [], csvIdx: 0, speed: 5
+  };
+
+  function initSimForSymbol(sym){
+    const baseSeed = (state.simSeeds[sym] ?? (hashStr(sym) ^ hashStr(String(engine.seed))));
+    state.simSeeds[sym] = baseSeed; save();
+    engine.rng = xorshift32(baseSeed||1);
+    // Initial price deterministic-ish
+    const base = 50 + Math.floor(engine.rng()*250); // 50–300
+    engine.lastPrice = state.symbolPrice[sym] || base;
+  }
+
+  function startEngine(){
+    stopEngine();
+    engine.resolution = $('#resolution').value;
+    const sec = RES_SEC[engine.resolution] || 900;
+    engine.lastBarStart = Math.floor(Date.now()/1000/sec)*sec;
+    engine.curBar = { time:engine.lastBarStart, open:engine.lastPrice||100, high:engine.lastPrice||100, low:engine.lastPrice||100, close:engine.lastPrice||100 };
+    candleSeries.setData([engine.curBar]);
+    priceLineSeries.setData([{time:engine.curBar.time, value:engine.curBar.close}]);
+
+    if(engine.mode==='sim'){
+      $('#engineLabel').textContent = 'Engine: Simulator';
+      engine.timer = setInterval(simTick, Math.max(100, engine.tickMs|0));
+    }else{
+      $('#engineLabel').textContent = 'Engine: CSV Replay';
+      engine.timer = setInterval(csvTick, Math.max(100, 1000/engine.speed));
+    }
+  }
+  function stopEngine(){ if(engine.timer){ clearInterval(engine.timer); engine.timer=null; } }
+
+  function simTick(){
+    const dt = (engine.tickMs|0)/1000; // seconds per tick
+    const z = gaussian(engine.rng);
+    const mu = Number($('#mu').value)||engine.mu;
+    const sigma = Number($('#sigma').value)||engine.sigma;
+    const S = engine.lastPrice;
+    const Snext = S * Math.exp((mu - 0.5*sigma*sigma)*dt + sigma*Math.sqrt(dt)*z);
+    updatePrice(Math.max(0.01, Snext));
+  }
+
+  function csvTick(){
+    if(engine.csvIdx >= engine.csvCandles.length){ stopEngine(); return; }
+    const c = engine.csvCandles[engine.csvIdx++];
+    // ใช้ close เป็น last price และดันแท่งใหม่ทีละแท่ง
+    engine.lastBarStart = c.time;
+    engine.curBar = { time:c.time, open:c.open, high:c.high, low:c.low, close:c.close };
+    candleSeries.update(engine.curBar);
+    priceLineSeries.update({time:c.time, value:c.close});
+    engine.lastPrice = c.close;
+    markLastPrice();
+    afterPriceUpdate();
+  }
+
+  function updatePrice(p){
+    const sec = RES_SEC[engine.resolution] || 900;
+    const t = Math.floor(Date.now()/1000);
+    const barStart = Math.floor(t/sec)*sec;
+    if(barStart !== engine.lastBarStart){
+      // push bar
+      candleSeries.update(engine.curBar);
+      engine.lastBarStart = barStart;
+      engine.curBar = { time:barStart, open:p, high:p, low:p, close:p };
+    }else{
+      engine.curBar.high = Math.max(engine.curBar.high, p);
+      engine.curBar.low  = Math.min(engine.curBar.low, p);
+      engine.curBar.close= p;
+    }
+    engine.lastPrice = p;
+    candleSeries.update(engine.curBar);
+    priceLineSeries.update({time:engine.curBar.time, value:engine.curBar.close});
+    markLastPrice();
+    afterPriceUpdate();
+  }
+
+  function markLastPrice(){
+    state.symbolPrice[engine.symbol] = engine.lastPrice;
+    $('#pxNow').textContent = fmtNum(engine.lastPrice);
+  }
+
+  function afterPriceUpdate(){
+    // ประเมินออเดอร์ค้างของสัญลักษณ์นี้
+    matchOpenOrders(engine.symbol, engine.lastPrice);
+    // ประเมินพอร์ต
+    renderTables(); recalcPortfolio();
+  }
+
+  // ===== Orders / Matching =====
+  function placeMarket(side, sym, qty){
+    const px = engine.lastPrice;
+    if(!px){ alert('ยังไม่มีราคา'); return; }
+    fillOrder({type:'MKT', side, sym, qty, px});
+  }
+  function placeLimit(side, sym, qty, limitPx){
+    if(!limitPx){ alert('กรุณาใส่ Limit Price'); return; }
+    const id = 'L'+Date.now()+Math.random().toString(16).slice(2);
+    state.orders.unshift({id, ts:new Date().toISOString(), type:'LMT', side, sym, qty, limitPx:Number(limitPx)});
+    save(); renderOrders();
+  }
+  function placeStop(side, sym, qty, stopPx){
+    if(!stopPx){ alert('กรุณาใส่ Stop Price'); return; }
+    const id = 'S'+Date.now()+Math.random().toString(16).slice(2);
+    state.orders.unshift({id, ts:new Date().toISOString(), type:'STP', side, sym, qty, stopPx:Number(stopPx), armed:false});
+    save(); renderOrders();
+  }
+  function cancelOrder(id){
+    state.orders = state.orders.filter(o=>o.id!==id); save(); renderOrders();
+  }
+
+  function matchOpenOrders(sym, lastPx){
+    const toFill = [];
+    state.orders.forEach(o=>{
+      if(o.sym!==sym) return;
+      if(o.type==='LMT'){
+        if(o.side==='BUY' && lastPx<=o.limitPx) toFill.push(o);
+        if(o.side==='SELL'&& lastPx>=o.limitPx) toFill.push(o);
+      }else if(o.type==='STP'){
+        // ทะลุ Stop ก็กลายเป็น Market
+        if(o.side==='BUY' && lastPx>=o.stopPx) toFill.push(o);
+        if(o.side==='SELL'&& lastPx<=o.stopPx) toFill.push(o);
+      }
+    });
+    toFill.forEach(o=>{
+      // fill ที่ราคาตลาด ณ จุดทริกเกอร์
+      fillOrder({type:o.type, side:o.side, sym:o.sym, qty:o.qty, px:lastPx});
+      cancelOrder(o.id);
+    });
+  }
+
+  // ===== Positions / Fills =====
+  function getPos(sym){ return state.positions[sym] || {qty:0, avg:0, lots:[]}; }
+  function setPos(sym, pos){ state.positions[sym]=pos; if(pos.qty===0) delete state.positions[sym]; }
+
+  function fillOrder({type, side, sym, qty, px}){
+    qty = Math.max(1, Math.floor(qty));
+    const cost = px*qty;
+    if(side==='BUY'){
+      if(state.cash < cost){ alert('เงินสดไม่พอ'); return; }
+      const p = getPos(sym);
+      const newQty = p.qty + qty;
+      const newAvg = (p.qty*p.avg + cost) / newQty;
+      p.qty=newQty; p.avg=newAvg; p.lots.push({qty, price:px});
+      setPos(sym,p);
+      state.cash -= cost;
+      pushHist('BUY', sym, qty, px, 0);
+    }else{ // SELL
+      const p = getPos(sym);
+      if(p.qty < qty){ alert('มีหุ้นไม่พอขาย'); return; }
+      let remaining = qty, realized = 0;
+      // FIFO lots
+      while(remaining>0 && p.lots.length){
+        const lot = p.lots[0];
+        const take = Math.min(remaining, lot.qty);
+        realized += (px - lot.price)*take;
+        lot.qty -= take; remaining -= take;
+        if(lot.qty===0) p.lots.shift();
+      }
+      p.qty -= qty;
+      setPos(sym,p);
+      state.cash += cost;
+      pushHist('SELL', sym, qty, px, realized);
+    }
+    save(); renderTables(); recalcPortfolio();
+  }
+
+  function pushHist(side, sym, qty, px, realized){
+    state.history.unshift({
+      ts: new Date().toISOString(), side, sym, qty, px, notional: qty*px, realized
+    });
+  }
+
+  // ===== Portfolio calc =====
+  function recalcPortfolio(){
+    let mkt = 0;
+    Object.entries(state.positions).forEach(([sym,p])=>{
+      const px = state.symbolPrice[sym] ?? p.avg;
+      mkt += px * p.qty;
+    });
+    const equity = state.cash + mkt;
+    const totalPnL = equity - state.startingCash;
+    $('#cash').textContent = fmtUSD(state.cash);
+    $('#equity').textContent = fmtUSD(equity);
+    const sign = totalPnL>=0?'+':'';
+    $('#totalPnL').textContent = sign + fmtUSD(totalPnL);
+  }
+
+  // ===== Renderers =====
+  const watchDefaults = ['AAPL','MSFT','NVDA','TSLA','AMZN','GOOGL','META','AMD','NFLX','BABA'];
+  function renderWatchlist(){
+    const el = $('#watchlist'); el.innerHTML='';
+    const list = Array.from(new Set([state.pinned, ...watchDefaults])).filter(Boolean);
+    list.forEach(sym=>{
+      const chip = document.createElement('div');
+      chip.className = 'chip' + (sym===state.symbol?' active':'');
+      chip.textContent = sym;
+      chip.title = 'คลิกเพื่อสลับ / ดับเบิลคลิกเพื่อปักหมุด';
+      chip.onclick = ()=> setSymbol(sym);
+      chip.ondblclick = ()=>{ state.pinned=sym; save(); renderWatchlist(); };
+      el.appendChild(chip);
+    });
+  }
+
+  function renderTables(){
+    // Positions
+    const tb = $('#posTable tbody'); tb.innerHTML='';
+    Object.entries(state.positions).forEach(([sym,p])=>{
+      const px = state.symbolPrice[sym] ?? p.avg;
+      const pnl = (px - p.avg)*p.qty;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${sym}</td><td>${fmtNum(p.qty)}</td><td>${fmtNum(p.avg)}</td><td>${fmtNum(px)}</td><td class="${pnl>=0?'pos':'neg'}">${fmtNum(pnl)}</td>`;
+      tb.appendChild(tr);
+    });
+    renderOrders();
+    // History
+    const hb = $('#histTable tbody'); hb.innerHTML='';
+    state.history.slice(0,200).forEach(h=>{
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${new Date(h.ts).toLocaleString('th-TH')}</td>
+        <td>${h.sym}</td>
+        <td style="color:${h.side==='BUY'?'#10b981':'#ef4444'}">${h.side}</td>
+        <td>${fmtNum(h.qty)}</td>
+        <td>${fmtNum(h.px)}</td>
+        <td>${fmtUSD(h.notional)}</td>
+        <td class="${h.realized>=0?'pos':'neg'}">${fmtNum(h.realized)}</td>`;
+      hb.appendChild(tr);
+    });
+  }
+
+  function renderOrders(){
+    const ob = $('#ordTable tbody'); ob.innerHTML='';
+    state.orders.forEach(o=>{
+      const px = o.type==='LMT' ? o.limitPx : (o.type==='STP'? o.stopPx : '-');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${new Date(o.ts).toLocaleString('th-TH')}</td>
+        <td>${o.sym}</td>
+        <td style="color:${o.side==='BUY'?'#10b981':'#ef4444'}">${o.side}</td>
+        <td>${o.type}</td>
+        <td>${typeof px==='number'?fmtNum(px):'-'}</td>
+        <td>${fmtNum(o.qty)}</td>
+        <td><button data-id="${o.id}">ยกเลิก</button></td>`;
+      tr.querySelector('button').onclick = ()=> cancelOrder(o.id);
+      ob.appendChild(tr);
+    });
+  }
+
+  // ===== Symbol switching =====
+  function setSymbol(sym){
+    sym = (sym||'').trim().toUpperCase(); if(!sym) return;
+    state.symbol = sym; save();
+    document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.textContent===sym));
+    engine.symbol = sym;
+    if(engine.mode==='sim'){
+      initSimForSymbol(sym);
+      startEngine();
+    }else{
+      // CSV: ใช้ข้อมูลที่อัปโหลดไว้แล้ว (ถ้าไม่มีให้โหลดไฟล์ก่อน)
+      if(!engine.csvCandles.length){ $('#pxNow').textContent='—'; candleSeries.setData([]); priceLineSeries.setData([]); }
+      else { engine.csvIdx=0; startEngine(); }
+    }
+    recalcPortfolio(); renderTables(); renderWatchlist();
+  }
+
+  // ===== Events =====
+  $('#setSymbolBtn').onclick = ()=> setSymbol($('#symbolInput').value||state.symbol);
+  $('#btnBuy').onclick  = ()=> { const q=+$('#qtyInput').value||1; placeMarket('BUY', state.symbol, q); };
+  $('#btnSell').onclick = ()=> { const q=+$('#qtyInput').value||1; placeMarket('SELL', state.symbol, q); };
+
+  $('#btnPlaceLimitBuy').onclick  = ()=>{ const q=+$('#qtyInput').value||1; placeLimit('BUY', state.symbol, q, +$('#limitPx').value); };
+  $('#btnPlaceLimitSell').onclick = ()=>{ const q=+$('#qtyInput').value||1; placeLimit('SELL', state.symbol, q, +$('#limitPx').value); };
+  $('#btnPlaceStopBuy').onclick   = ()=>{ const q=+$('#qtyInput').value||1; placeStop('BUY', state.symbol, q, +$('#stopPx').value); };
+  $('#btnPlaceStopSell').onclick  = ()=>{ const q=+$('#qtyInput').value||1; placeStop('SELL', state.symbol, q, +$('#stopPx').value); };
+
+  $('#reloadBtn').onclick = ()=> startEngine();
+  $('#resolution').onchange = ()=> startEngine();
+
+  $('#dataMode').onchange = ()=>{
+    engine.mode = $('#dataMode').value;
+    $('#simPanel').style.display = engine.mode==='sim' ? 'flex' : 'none';
+    $('#csvPanel').style.display = engine.mode==='csv' ? 'flex' : 'none';
+    if(engine.mode==='sim'){ initSimForSymbol(state.symbol); startEngine(); }
+    else { stopEngine(); /* รอไฟล์ CSV */ $('#engineLabel').textContent='Engine: CSV Replay'; }
+  };
+  $('#mu').onchange = ()=> engine.mu = +$('#mu').value;
+  $('#sigma').onchange = ()=> engine.sigma = +$('#sigma').value;
+  $('#tickMs').onchange = ()=> engine.tickMs = Math.max(50,(+$('#tickMs').value||1000));
+  $('#seed').onchange = ()=> { engine.seed = +$('#seed').value||1; initSimForSymbol(state.symbol); startEngine(); };
+
+  $('#csvFile').onchange = async (e)=>{
+    const file = e.target.files?.[0]; if(!file) return;
+    const text = await file.text();
+    const rows = text.trim().split(/\r?\n/);
+    const header = rows.shift().split(',').map(s=>s.trim().toLowerCase());
+    const idx = {
+      time: header.indexOf('time'),
+      open: header.indexOf('open'),
+      high: header.indexOf('high'),
+      low:  header.indexOf('low'),
+      close:header.indexOf('close')
+    };
+    if(Object.values(idx).some(i=>i<0)){ alert('CSV ต้องมีคอลัมน์ time,open,high,low,close'); return; }
+    const parseTime = v=>{
+      if(/^\d{10}$/.test(v)) return +v; // unix sec
+      if(/^\d{13}$/.test(v)) return Math.floor(+v/1000); // unix ms
+      const t = Date.parse(v); return isNaN(t)? null : Math.floor(t/1000);
+    };
+    const candles=[];
+    for(const line of rows){
+      const parts=line.split(',');
+      const t=parseTime(parts[idx.time]);
+      if(!t) continue;
+      const o=+parts[idx.open], h=+parts[idx.high], l=+parts[idx.low], c=+parts[idx.close];
+      if([o,h,l,c].some(x=>!isFinite(x))) continue;
+      candles.push({time:t, open:o, high:h, low:l, close:c});
+    }
+    candles.sort((a,b)=>a.time-b.time);
+    engine.csvCandles = candles;
+    engine.csvIdx = 0;
+    engine.lastPrice = candles.length? candles[0].open : null;
+    engine.speed = +$('#replaySpeed').value||5;
+    startEngine();
+  };
+  $('#replaySpeed').onchange = ()=>{ engine.speed = +$('#replaySpeed').value||5; if(engine.mode==='csv'){ startEngine(); } };
+
+  // Settings
+  $('#settingsBtn').onclick = ()=> $('#settingsDlg').showModal();
+  $('#closeSettings').onclick = ()=> $('#settingsDlg').close();
+  $('#saveSettings').onclick = ()=>{
+    state.startingCash = +$('#startingCash').value||10000;
+    if(state.history.length===0){ state.cash = state.startingCash; }
+    save(); $('#settingsDlg').close(); recalcPortfolio();
+  };
+  $('#resetBtn').onclick = resetAll;
+
+  // ===== Boot =====
+  (function boot(){
+    renderWatchlist();
+    $('#startingCash').value = state.startingCash;
+    engine.mode = 'sim';
+    engine.mu = +$('#mu').value; engine.sigma = +$('#sigma').value; engine.tickMs = +$('#tickMs').value; engine.seed = +$('#seed').value;
+    $('#dataMode').value = 'sim';
+    $('#engineLabel').textContent = 'Engine: Simulator';
+    setSymbol(state.symbol || 'AAPL');
+    $('#symbolInput').value = state.symbol;
+    recalcPortfolio(); renderTables();
+    chart.timeScale().fitContent();
+  })();
+
+})();
+</script>
+</body>
+</html>
